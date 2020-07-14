@@ -1,16 +1,20 @@
 package de.jl.myli;
 
+import java.util.ArrayList;
 import java.util.List;
 
+import de.jl.myli.constants.UniCodeChars;
+import de.jl.myli.items.MyLiBracket;
 import de.jl.myli.items.MyLiItem;
+import de.jl.myli.items.MyLiOperator;
 import de.jl.myli.items.MyLiVar;
 
 public class MyLiTaskRunner {
-
-	public List<MyLiTask> t = null;
 	
-	public MyLiTaskRunner(List<MyLiTask> tasks) {
-		this.t = tasks;
+	public MyLiTask t = null;
+	
+	public MyLiTaskRunner(MyLiTask task) {
+		this.t = task;
 	}
 	/**
 	 * Checks, if the list contains a variable with the name <i>varName</i> 
@@ -34,7 +38,7 @@ public class MyLiTaskRunner {
 	 */
 	public Integer count() {
 		if (this.t != null) {
-			return this.t.size();
+			return this.t.getTasks().size();
 		} else {
 			return -1;
 		}
@@ -60,7 +64,7 @@ public class MyLiTaskRunner {
 	 */
 	public String runTasks() {
 		String s = "";
-		for(Integer i = 0; i<t.size(); i++) {
+		for(Integer i = 0; i<this.count(); i++) {
 			try {
 				s = s.concat(runTask(i)).concat(System.lineSeparator());
 			} catch (IndexOutOfBoundsException e) {
@@ -78,35 +82,148 @@ public class MyLiTaskRunner {
 	public String runTask(Integer index) throws IndexOutOfBoundsException {
 		MyLiVar var = null;
 		String s = "";
-		String tmp_text = "";
-		Double tmp_number = -1d;
-		Double current_number = -1d;
+		List<MyLiItem> left_stack = new ArrayList<MyLiItem>();
+		List<MyLiOperator> operator_stack = new ArrayList<MyLiOperator>();
+		List<MyLiItem> right_stack = new ArrayList<MyLiItem>();
+		MyLiItem result = null;
 		if (index < this.count()) {
-			MyLiTask task = t.get(index);
-			List<MyLiVar> vars = task.getVars();
-			for (Integer i = 0; i < task.getTaskItems(i).size(); i++) {
-				List<MyLiItem> items = task.getTaskItems(i);
-				for (Integer j=0; j < items.size(); j++) {
-					MyLiItem item = items.get(j);
-					if (item.isNumber()) {
-						if (current_number == -1d) {
-							current_number = Double.parseDouble(item.getValue());
-						}
-					} else if (item.isOperator()) {
-						
-					} else if (item.isText()) {
-						
-					} else if (item.isVariable()) {
-						if(containsVariable(item.getValue(), vars)) {
-							var = getVariable(item.getValue(), vars);
-						}
-					}
-				}			
+			List<MyLiVar> vars = this.t.getVars();
+			for (Integer i = 0; i < this.count(); i++) {
+				List<MyLiItem> items = this.t.getTaskItems(i);
+					result  = runSubtask(items,  0, items.size(), MyLiTask.BRACKET).get(0);
+					s = s.concat(result.getValue());
 			}		
 		} else {
 			throw new IndexOutOfBoundsException("There are not enough task available: index: [" + index + "]");
 		}
 		return s;
 	}
+	
+	/**
+	 * Reucurision: Calculates the result by evaluating inner subtasks, providing the result upwise.
+	 * @param items, the whole task, splited into items
+	 * @param startingIndex, the index of the current subtask
+	 * @param taskType, tell, if the current subtask is a punctuation, bracket or something else
+	 * @return MyLiItem, an adapted Task where inner results are calculated.
+	 */
+	private List<MyLiItem> runSubtask(List<MyLiItem> items, Integer startingIndex, Integer stopIndex, Integer taskType) {
+		List<MyLiItem> result = new ArrayList<MyLiItem>();
+		MyLiItem item = null;
+		MyLiItem left = null;
+		MyLiOperator operator = null;
+		MyLiBracket bracket = null;
+		Integer bracketLevel = -1;
+		MyLiOperator next_operator = null;
+		Integer lastIndex = -1;
+		Integer newStart = -1;
+		Integer newStop = -1;
+		MyLiItem right = null;
+		for (Integer i=startingIndex; i<stopIndex; i++) {
+			item = items.get(i);
+			
+			// if bracket, then a subtask may opened or closed
+			if (item.isBracket()) {
+				bracket = (MyLiBracket)item;
+				if (UniCodeChars.isOpeningBracket(bracket.getOperatorValue())) {
+					// if bracket level is not set, then a subtask is opened
+					if(bracketLevel == -1) {
+						bracketLevel = bracket.getLevel();
+						newStart = i+1;
+						left = null;
+					} 				
+				} else if (UniCodeChars.isClosingBracket(bracket.getOperatorValue())) {
+					// check if bracket is in right level
+					if(bracketLevel == bracket.getLevel()) {
+						newStop = i;
+						// the shortened itemslist is given back.
+						result = runSubtask(items, newStart, newStop, MyLiTask.BRACKET);
+						right = result.get(0);
+						i = newStart;
+						bracketLevel = -1;
+						bracket = null;
+						stopIndex = items.size()- newStop;
+					}
+				}
+			} else if (item.isOperator()) {
+				if (operator == null) {
+					operator = (MyLiOperator)item;				
+				}
+			} else if (item.isNumber() || item.isText()) {
+				if (left == null) {
+					left = item;
+				} else if (right == null) {
+					right = item;
+				}
+			}
+			
+			if (left != null && right != null) {
+				left = doOperation(left, operator, right);
+				result.add(left);
+				right = null;
+				operator = null;
+			}
+			
 
+		}
+		
+		
+/*
+		if (item.isOperator()) {
+			if (current_operator == null) {
+			}		
+		} else if (item.isVariable()) {
+			if(containsVariable(item.getValue(), vars)) {
+				var = getVariable(item.getValue(), vars);
+				next_item = new MyLiItem(var.getValue(), var.getType());
+			}
+		} else if (item.isNumber()) {
+			next_item = item;
+			if (current_item == null) {
+				current_item = next_item;
+			} else {
+				current_item = doOperation(current_item, current_operator, next_item);
+			}
+		} else if (item.isText()) {
+		}  
+*/
+		
+		return result;
+	}
+	
+	private MyLiItem doOperation(MyLiItem left, MyLiOperator operator, MyLiItem right) {
+		if(left.isText()) {
+			return doConcatention(left.getValue(), operator.getOperatorValue(), right.getValue());  
+		} else {
+			if(right.isText()) {
+				return doConcatention(left.getValue(), operator.getOperatorValue(), right.getValue());  
+			} else {
+				return doMathematicalOperation(left.getNumberValue(), operator.getOperatorValue(), right.getNumberValue());
+			}
+		}
+	}
+		
+	private MyLiItem doConcatention(String left, Character operator, String right) throws UnsupportedOperationException {
+		if(UniCodeChars.isEqual(UniCodeChars.PLUS, operator)) {
+			return new MyLiItem(left.concat(right), MyLiItem.TEXT);
+		} else {
+			throw new UnsupportedOperationException("The operator [" + operator + "] is not supported.");
+		}
+	}
+	
+	private MyLiItem doMathematicalOperation(Double left, Character operator, Double right) throws UnsupportedOperationException {
+		if(UniCodeChars.isEqual(UniCodeChars.PLUS, operator)) {
+			return new MyLiItem(left + right, MyLiItem.NUMBER);
+		} else if(UniCodeChars.isEqual(UniCodeChars.MINUS, operator)) {
+			return  new MyLiItem(left - right, MyLiItem.NUMBER);
+		} else if(UniCodeChars.isEqual(UniCodeChars.ASTERISK, operator)) {
+			return  new MyLiItem(left * right, MyLiItem.NUMBER);
+		} else if(UniCodeChars.isEqual(UniCodeChars.SOLIDUS, operator)) {
+			if (right != 0)
+				return  new MyLiItem(left / right, MyLiItem.NUMBER);
+			else
+				throw new UnsupportedOperationException("Divison by zero is not allowed.");
+		} else {
+			throw new UnsupportedOperationException("The operator [" + operator + "] is not supported.");
+		}
+	}
 }
